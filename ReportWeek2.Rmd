@@ -1,0 +1,167 @@
+---
+title: "MilestoneReportWeek2"
+output: html_document
+---
+
+This report is based on the Milestone project of Coursera Data science specialization. The goal of
+the project is to implement a useful predictive text model and build a predictive text product.
+This report only focus on data understanding and exploratory anaysis. 
+
+
+Tasks to accomplish
+
+1.Exploratory analysis - perform a thorough exploratory analysis of the data, understanding the distribution of words and relationship between the words in the corpora.
+
+2.Understand frequencies of words and word pairs - build figures and tables to understand variation in the frequencies of words and word pairs in the data.
+
+## Load data
+
+First, we load the libraries
+```{r message=FALSE, warning=FALSE}
+library(tm)
+library(RWeka)
+library(stringr)
+library(wordcloud)
+library(ggplot2)
+```
+
+# suppose we have downloaded the data and unzipped it. 
+https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip
+
+```{r warning=FALSE}
+twitters <- readLines('./Coursera-SwiftKey/final/en_US/en_US.twitter.txt', encoding = 'UTF-8', skipNul = TRUE)
+blogs <- readLines('./Coursera-SwiftKey/final/en_US/en_US.blogs.txt', encoding = 'UTF-8', skipNul = TRUE)
+
+news_file <- file('./Coursera-SwiftKey/final/en_US/en_US.news.txt')
+news <- readLines(news_file, encoding = 'UTF-8', skipNul = TRUE)
+close(news_file)
+```
+
+## Get data information
+```{r}
+long_twitters <- nchar(twitters)
+long_blogs <- nchar(blogs)
+long_news <- nchar(news)
+
+data.frame('Total Lines' = c(length(twitters), length(blogs), length(news)),
+           'Total Characters' = c(sum(long_twitters), sum(long_blogs), sum(long_news)),
+           'characters LongestLine' = c(max(long_twitters), max(long_blogs), max(long_news)),
+           row.names = c('twitter', 'blog', 'new'))
+```
+
+## Data Sampling
+Because the size of data sets are very big, so we only get 1% percent samples to save processing time.
+```{r}
+sample_percent <- 0.01
+set.seed(2213)
+sub_twitter <- sample(twitters, length(twitters) * sample_percent)
+sub_blogs <- sample(blogs, length(blogs) * sample_percent)
+sub_news <- sample(news, length(news) * sample_percent)
+
+# merge the three data sets into a larger one
+total <- c(sub_twitter, sub_blogs, sub_news)
+
+# convert invalid characters
+total <- iconv(total, "latin1", "ASCII", sub = '')
+```
+
+## Build corpus
+Build our corpus and do some transform: remove punctuation, convert characters to lower case, remove white space and numbers, and convert data to plain text.
+```{r}
+corpus <- Corpus(VectorSource(total))
+
+# clean data
+corpus <- tm_map(corpus, removePunctuation)
+corpus <- tm_map(corpus, content_transformer(tolower))
+corpus <- tm_map(corpus, stripWhitespace)
+corpus <- tm_map(corpus, removeNumbers)
+corpus <- tm_map(corpus, PlainTextDocument)
+```
+
+## Tokenization N-gram
+Build tokenizers and create Term-Document Matrices
+```{r}
+one_gram <- function(x) NGramTokenizer(x, Weka_control(min = 1, max = 1))
+two_gram <- function(x) NGramTokenizer(x, Weka_control(min = 2, max = 2))
+three_gram <- function(x) NGramTokenizer(x, Weka_control(min = 3, max = 3))
+
+# create Term-Document Matrices
+one_tdm <- TermDocumentMatrix(corpus, control = list(tokenize = one_gram))
+two_tdm <- TermDocumentMatrix(corpus, control = list(tokenize = two_gram))
+three_tdm <- TermDocumentMatrix(corpus, control = list(tokenize = three_gram))
+```
+
+## Remove sparse terms
+```{r}
+one_tdm
+inspect(one_tdm[20:25, 1:10])
+```
+
+As we see most entries in tdm are empty, lots of zeros in the matrix, and the maximal term length is 68, there are some meaningless words, we need to remove them.
+
+We set the threshold values is 99%
+```{r}
+one_tdm_rs <- removeSparseTerms(one_tdm, 0.99)
+one_tdm_rs
+```
+
+Then the sparsity and maximal term length seem to be normal.
+
+we try same threshold to the other two tdms, but not working very well.
+```{r}
+temp_tdm <- removeSparseTerms(two_tdm, 0.99)
+temp_tdm
+temp_tdm <- removeSparseTerms(three_tdm, 0.99)
+temp_tdm
+```
+
+## Words frequency
+```{r}
+# most frequently terms, we choose different lower frequency bound for each grams.  
+one_freq <- findFreqTerms(one_tdm_rs, 100)
+two_freq <- findFreqTerms(two_tdm, 50)
+three_freq <- findFreqTerms(three_tdm, 20)
+
+# calculate the frequency
+one_freq <- sort(rowSums(as.matrix(one_tdm_rs[one_freq, ])), decreasing = TRUE)
+two_freq <- sort(rowSums(as.matrix(two_tdm[two_freq, ])), decreasing = TRUE)
+three_freq <- sort(rowSums(as.matrix(three_tdm[three_freq, ])), decreasing = TRUE)
+
+# build data frame
+one_freq_data <- data.frame(word = names(one_freq), frequency = one_freq)
+two_freq_data <- data.frame(word = names(two_freq), frequency = two_freq)
+three_freq_data <- data.frame(word = names(three_freq), frequency = three_freq)
+```
+
+## Plot
+```{r}
+g <- ggplot(data = one_freq_data[1:15, ], aes(x=reorder(word, -frequency), y = frequency))
+g <- g + geom_bar(stat = 'identity', fill = 'blue', colour = 'black')
+g <- g + xlab('Word') + ylab('Frequency') + ggtitle("Most frequency words")
+g
+```
+
+```{r}
+g <- ggplot(data = two_freq_data[1:15, ], aes(x=reorder(word, -frequency), y = frequency))
+g <- g + geom_bar(stat = 'identity', fill = 'blue', colour = 'black')
+g <- g + xlab('2-grams') + ylab('Frequency') + ggtitle("Most frequency 2-grams")
+g <- g + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+g
+```
+
+```{r}
+g <- ggplot(data = three_freq_data[1:15, ], aes(x=reorder(word, -frequency), y = frequency))
+g <- g + geom_bar(stat = 'identity', fill = 'blue', colour = 'black')
+g <- g + xlab('3-grams') + ylab('Frequency') + ggtitle("Most frequency 3-grams")
+g <- g + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+g
+```
+
+## Word cloud
+Word cloud is an handy tool give us a quick visualization of the most frequency words.
+```{r}
+pal <- brewer.pal(8, 'Dark2')
+wordcloud(corpus, max.words = 100, random.order = FALSE, colors = pal)
+```
+
+
